@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-special-ed-voice-exam: 通用特教語音互動適性試卷生成器
-支援國語文、數學、生活常規各學科
+special-ed-voice-exam: 專案專用特教語音互動適性試卷生成器
+第一大題（圖文配對）：選項無語音按鈕，點選不朗讀，考查學生自主識字
+第二與三大題：題目與選項均有獨立語音按鈕
 """
 import os
 import sys
 import json
 import base64
 import asyncio
-import edge_tts
 
-DEFAULT_VOICE = "zh-TW-HsiaoChenNeural" # 溫暖親切的臺灣國語女聲
-DEFAULT_RATE = "-5%" # 語速放慢 5%
+DEFAULT_VOICE = "zh-TW-HsiaoChenNeural"
+DEFAULT_RATE = "-5%"
 
 def get_base64_from_file(file_path, mime_type="image/png"):
     if os.path.exists(file_path):
@@ -19,33 +19,12 @@ def get_base64_from_file(file_path, mime_type="image/png"):
             return f"data:{mime_type};base64," + base64.b64encode(f.read()).decode('utf-8')
     return ""
 
-async def synthesize_edge_tts(key, text, cache_dir, voice=DEFAULT_VOICE, rate=DEFAULT_RATE):
-    os.makedirs(cache_dir, exist_ok=True)
-    file_path = os.path.join(cache_dir, f"{key}.mp3")
-    if not os.path.exists(file_path):
-        communicate = edge_tts.Communicate(text, voice, rate=rate)
-        await communicate.save(file_path)
-    return get_base64_from_file(file_path, "audio/mp3")
-
 def math_to_spoken_chinese(text):
-    """
-    將數學常見算式符號轉為自然流利的臺灣教學口語
-    """
     replacements = [
-        (" + ", "加"),
-        (" - ", "減"),
-        (" * ", "乘以"),
-        (" / ", "除以"),
-        (" = ", "等於"),
-        ("＋", "加"),
-        ("－", "減"),
-        ("＝", "等於"),
-        (" x ", "乘以"),
-        (" × ", "乘以"),
-        (" ÷ ", "除以"),
-        ("?", "多少"),
-        ("？", "多少"),
-        ("$", "")
+        (" + ", "加"), (" - ", "減"), (" * ", "乘以"), (" / ", "除以"),
+        (" = ", "等於"), ("＋", "加"), ("－", "減"), ("＝", "等於"),
+        (" x ", "乘以"), (" × ", "乘以"), (" ÷ ", "除以"),
+        ("?", "多少"), ("？", "多少"), ("$", "")
     ]
     for old, new in replacements:
         text = text.replace(old, new)
@@ -292,6 +271,7 @@ def build_standalone_html(exam_data, sys_audio_dict, icon_emoji="📝", subject_
     }}
 
     function renderStandardQuestion(q, container) {{
+      const isMatch = (q.type === 'match');
       const card = document.createElement('div');
       card.className = "space-y-5";
 
@@ -304,7 +284,7 @@ def build_standalone_html(exam_data, sys_audio_dict, icon_emoji="📝", subject_
         `;
       }}
 
-      const mainText = q.type === 'match' ? q.desc : q.q_text;
+      const mainText = isMatch ? q.desc : q.q_text;
 
       card.innerHTML = `
         <div class="flex flex-col md:flex-row items-center gap-5 bg-gradient-to-r from-slate-50 to-blue-50/60 p-4 md:p-5 rounded-2xl border-2 border-slate-200 shadow-sm">
@@ -319,7 +299,7 @@ def build_standalone_html(exam_data, sys_audio_dict, icon_emoji="📝", subject_
             <h3 class="text-xl md:text-2xl font-black text-slate-800 leading-snug tracking-wide">
               ${{mainText}}
             </h3>
-            ${{q.type === 'match' ? '<p class="text-sm font-bold text-blue-700 mt-2">★ 請看圖片或點按鈕聽語音，點選最符合的卡片：</p>' : ''}}
+            ${{isMatch ? '<p class="text-sm font-bold text-blue-700 mt-2">★ 請看題目與圖片，自己閱讀下方詞語卡片並選出答案：</p>' : ''}}
           </div>
         </div>
 
@@ -336,7 +316,9 @@ def build_standalone_html(exam_data, sys_audio_dict, icon_emoji="📝", subject_
             ? 'card-selected border-blue-600 bg-blue-50 ring-2 ring-blue-400' 
             : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50 shadow-sm'
         }}`;
-        cardBox.onclick = () => selectOption(q.id, opt.id, opt.audio);
+        
+        // 第一大題：不朗讀選項音訊，只觸發選取音效；第二大題：朗讀選項音訊
+        cardBox.onclick = () => selectOption(q.id, opt.id, isMatch ? null : opt.audio);
 
         cardBox.innerHTML = `
           <div class="flex items-center gap-3 flex-1">
@@ -351,10 +333,13 @@ def build_standalone_html(exam_data, sys_audio_dict, icon_emoji="📝", subject_
             </div>
           </div>
 
-          <button onclick="event.stopPropagation(); playAudioData('${{opt.audio}}')" class="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs md:text-sm font-black rounded-xl shadow-sm transition transform active:scale-95 flex-shrink-0" title="點我聽這個選項發音">
-            <span class="text-base">🔊</span>
-            <span class="hidden sm:inline">聽選項</span>
-          </button>
+          ${{isMatch 
+            ? '<span class="text-xs font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">👀 自己看字</span>' 
+            : `<button onclick="event.stopPropagation(); playAudioData('${{opt.audio}}')" class="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs md:text-sm font-black rounded-xl shadow-sm transition transform active:scale-95 flex-shrink-0" title="點我聽這個選項發音">
+                 <span class="text-base">🔊</span>
+                 <span class="hidden sm:inline">聽選項</span>
+               </button>`
+          }}
         `;
         grid.appendChild(cardBox);
       }});
